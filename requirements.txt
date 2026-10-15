@@ -1,6 +1,6 @@
 python-telegram-bot
 moviepy==1.0.3
 pillow
-openai-whisper
+opencv-python-headless
+numpy
 yt-dlp
-torch
