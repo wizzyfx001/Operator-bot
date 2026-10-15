@@ -1,5 +1,5 @@
 python-telegram-bot==20.7
 moviepy==1.0.3
-librosa
-numpy
-soundfile
+librosa==0.10.1
+soundfile==0.12.1
+numpy==1.26.4
