@@ -1,4 +1,4 @@
-import os, tempfile, asyncio, traceback, random, numpy as np
+import os, tempfile, asyncio, traceback, random, numpy as np, requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 import PIL.Image
@@ -9,7 +9,7 @@ MAX_DURATION=20
 
 def menu(v=0,a=False):
     kb=[]
-    if v>0 and a: kb.append([InlineKeyboardButton(f"🔥 SMART Edit V24.1 ({v} vids)", callback_data="edit")])
+    if v>0 and a: kb.append([InlineKeyboardButton(f"🔥 SMART Edit V24.2 ({v} vids)", callback_data="edit")])
     kb.append([InlineKeyboardButton(f"Videos: {v} | Audio: {'Yes' if a else 'No'}", callback_data="status")])
     kb.append([InlineKeyboardButton("🗑 Clear", callback_data="clear")])
     return InlineKeyboardMarkup(kb)
@@ -17,7 +17,7 @@ def menu(v=0,a=False):
 async def start(update, context):
     context.user_data["videos"]=[]; context.user_data["search_results"]=[]
     if "audio" in context.user_data: del context.user_data["audio"]
-    await update.message.reply_text("👋 V24.1 SoundCloud FIXED\n\n1. Send videos as FILE\n2. /search eloy or send mp3 as FILE", reply_markup=menu())
+    await update.message.reply_text("👋 V24.2 Piped - Works for Naija + Foreign\n\n1. Send videos as FILE\n2. /search burna boy or /search eloy", reply_markup=menu())
 
 async def on_video(update, context):
     if "videos" not in context.user_data: context.user_data["videos"]=[]
@@ -31,30 +31,59 @@ async def on_audio(update, context):
     v=len(context.user_data.get("videos",[]))
     await update.message.reply_text(f"✅ Audio saved", reply_markup=menu(v, True))
 
+def piped_search(query):
+    # Use Piped API to search YouTube - bypasses bot check
+    try:
+        for instance in ["https://pipedapi.kavin.rocks", "https://api.piped.projectsegfau.lt", "https://pipedapi.adminforge.de"]:
+            try:
+                r=requests.get(f"{instance}/search", params={"q": query}, timeout=15)
+                data=r.json()
+                items=[x for x in data.get('items',[]) if x.get('type')=='stream'][:5]
+                if items: return items
+            except: continue
+        return []
+    except: return []
+
+def piped_download(video_id, out_path):
+    # Get audio stream from Piped
+    for instance in ["https://pipedapi.kavin.rocks", "https://api.piped.projectsegfau.lt", "https://pipedapi.adminforge.de"]:
+        try:
+            r=requests.get(f"{instance}/streams/{video_id}", timeout=15)
+            data=r.json()
+            # get best audio
+            audios=data.get('audioStreams',[])
+            if not audios: continue
+            # pick mp3/m4a highest quality
+            audio_url=sorted(audios, key=lambda x: x.get('bitrate',0), reverse=True)[0]['url']
+            rr=requests.get(audio_url, stream=True, timeout=30)
+            with open(out_path, 'wb') as f:
+                for chunk in rr.iter_content(8192): f.write(chunk)
+            return True
+        except Exception as e:
+            print(f"Piped {instance} fail {e}"); continue
+    return False
+
 async def search_cmd(update, context):
     query=" ".join(context.args)
-    if not query: return await update.message.reply_text("Use: /search eloy")
-    status=await update.message.reply_text(f"🔍 SoundCloud search: {query}...")
+    if not query: return await update.message.reply_text("Use: /search burna boy")
+    status=await update.message.reply_text(f"🔍 Piped YouTube search: {query}...")
     try:
-        import yt_dlp
-        ydl_opts={'quiet':True,'skip_download':True,'extract_flat':True}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result=ydl.extract_info(f"scsearch5:{query}", download=False)
-        if not result or 'entries' not in result or not result['entries']:
-            await status.edit_text("No results, try other word"); return
-        entries=list(result['entries'])[:5]
-        context.user_data["search_results"]=entries # save
+        items=await asyncio.to_thread(piped_search, query)
+        if not items:
+            await status.edit_text("No results, try different keyword or check spelling"); return
+        context.user_data["search_results"]=items
         buttons=[]
-        for i,e in enumerate(entries):
+        for i,e in enumerate(items):
             title=e.get('title','Unknown')[:45]
-            buttons.append([InlineKeyboardButton(f"🎵 {title}", callback_data=f"sc_{i}")])
-        await status.edit_text("SoundCloud results (click to download):", reply_markup=InlineKeyboardMarkup(buttons))
+            buttons.append([InlineKeyboardButton(f"🎵 {title}", callback_data=f"yt_{i}")])
+        await status.edit_text("YouTube results via Piped (Naija + foreign, no DRM):", reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e: await status.edit_text(f"Search error: {e}")
 
 async def do_edit(update_msg, context):
+    # same smart edit as before, no black, no repeat
     if not context.user_data.get("videos") or "audio" not in context.user_data:
         await update_msg.reply_text("Send video + audio first"); return
-    status=await update_msg.reply_text(f"⏳ V24.1 SMART processing...")
+    status=await update_msg.reply_text(f"⏳ V24.2 SMART processing...")
     try:
         from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips, TextClip, CompositeVideoClip
         import moviepy.video.fx.all as vfx
@@ -108,7 +137,7 @@ async def do_edit(update_msg, context):
                 for vc in vclips: vc.close(); aclip.close(); final.close(); merged.close()
             await asyncio.to_thread(process)
             await status.edit_text("📤 Uploading...")
-            await update_msg.reply_video(video=open(out,'rb'), caption="✅ V24.1 - Fixed, no black, no repeat")
+            await update_msg.reply_video(video=open(out,'rb'), caption="✅ V24.2 - Naija + Foreign OK")
             await status.delete()
     except Exception as e: await update_msg.reply_text(f"Error: {e}\n{traceback.format_exc()[-800:]}")
 
@@ -120,23 +149,25 @@ async def on_btn(update, context):
         context.user_data["videos"]=[]; context.user_data["search_results"]=[]
         if "audio" in context.user_data: del context.user_data["audio"]
         await q.message.edit_text("🗑 Cleared", reply_markup=menu(0,False))
-    elif d.startswith("sc_"):
+    elif d.startswith("yt_"):
         try:
             idx=int(d.split("_")[1])
             entries=context.user_data.get("search_results",[])
-            if idx>=len(entries): await q.message.reply_text("Search again, session expired"); return
-            url=entries[idx]['url']
-            status=await q.message.reply_text(f"⬇️ Downloading: {entries[idx].get('title','')[:30]}...")
-            import yt_dlp
+            if idx>=len(entries): await q.message.reply_text("Search again, expired"); return
+            item=entries[idx]
+            video_id=item.get('url','').split('=')[-1].split('/')[-1] if 'v=' in item.get('url','') else item.get('url','').split('/')[-1]
+            # Piped items have url like /watch?v=xxxx
+            if 'watch?v=' in item.get('url',''): video_id=item['url'].split('v=')[-1]
+            else: video_id=item.get('url','').split('/')[-1]
+            status=await q.message.reply_text(f"⬇️ Downloading via Piped: {item.get('title','')[:30]}...")
             with tempfile.TemporaryDirectory() as tmp:
-                ydl_opts={'format':'bestaudio/best','outtmpl':os.path.join(tmp,'audio.%(ext)s'),'postprocessors':[{'key':'FFmpegExtractAudio','preferredcodec':'mp3'}],'quiet':True}
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
-                for f in os.listdir(tmp):
-                    if f.endswith(".mp3"):
-                        p=os.path.join(tmp,f)
-                        await q.message.reply_audio(audio=open(p,'rb'), caption="✅ Downloaded! SEND THIS FILE BACK AS FILE to set as audio")
-                        await status.delete(); return
-                await status.edit_text("No mp3 found, try another")
+                mp3_path=os.path.join(tmp,"song.mp3")
+                ok=await asyncio.to_thread(piped_download, video_id, mp3_path)
+                if ok and os.path.exists(mp3_path) and os.path.getsize(mp3_path)>1000:
+                    await q.message.reply_audio(audio=open(mp3_path,'rb'), title=item.get('title',''), caption="✅ Downloaded! SEND THIS FILE BACK AS FILE to set as audio")
+                    await status.delete()
+                else:
+                    await status.edit_text("Piped failed, try another song or try again in 10 sec (Piped busy)")
         except Exception as e: await q.message.reply_text(f"Download fail: {e}")
 
 def main():
