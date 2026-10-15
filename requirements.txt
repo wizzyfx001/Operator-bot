@@ -4,4 +4,3 @@ pillow
 opencv-python-headless
 numpy
 yt-dlp
-requests
