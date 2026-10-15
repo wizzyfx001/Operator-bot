@@ -1,6 +1,6 @@
-python-telegram-bot==20.7
+python-telegram-bot
 moviepy==1.0.3
-numpy==1.26.4
 pillow
-librosa
-soundfile
+openai-whisper
+yt-dlp
+torch
