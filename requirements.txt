@@ -1,6 +1,6 @@
 python-telegram-bot==20.7
 moviepy==1.0.3
 numpy==1.26.4
-pillow==9.5.0
-librosa==0.10.1
-soundfile==0.12.12
+pillow
+librosa
+soundfile
