@@ -1,3 +1,4 @@
 python-telegram-bot==20.7
-moviepy==1.0.3
+moviepy
 imageio-ffmpeg
+pillow
