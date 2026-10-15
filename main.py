@@ -14,7 +14,7 @@ def menu(has_both=False):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("🔥 V10 BEAT SYNC\n✅ Cuts on EVERY beat\n✅ Finds cool moments\n✅ Reverse + Zoom + Shake\n1. Video as FILE\n2. MP3 as FILE\n3. /edit", reply_markup=menu())
+    await update.message.reply_text("🔥 V10.1 BEAT SYNC FIXED\n✅ Cuts on beat\n1. Video as FILE\n2. MP3 as FILE\n3. /edit", reply_markup=menu())
 
 async def on_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["video"]=(update.message.video or update.message.document).file_id
@@ -38,53 +38,50 @@ async def do_edit(update_msg, context):
             vf=await context.bot.get_file(context.user_data["video"])
             af=await context.bot.get_file(context.user_data["audio"])
             await vf.download_to_drive(v_in); await af.download_to_drive(a_in)
-            await status.edit_text("🎧 Step 2/3: Analyzing beats...")
+            await status.edit_text("🎧 Step 2/3: Analyzing beats... 1-2 min")
 
             def process():
-                import librosa
                 vclip=VideoFileClip(v_in)
                 aclip=AudioFileClip(a_in)
 
-                # --- BEAT DETECTION ---
+                # TRY to get real beats
+                beat_times = []
                 try:
-                    y, sr = librosa.load(a_in, duration=30) # analyze first 30 sec max
-                    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, units='time')
-                    beat_times = beat_frames # when units='time' it returns times directly
-                    # Ensure beats sorted and within audio
-                    beat_times = [float(b) for b in beat_times if b < min(aclip.duration, 15)]
-                    if len(beat_times) < 8:
-                        raise ValueError("too few beats")
+                    import librosa
+                    y, sr = librosa.load(a_in, duration=30)
+                    tempo, bf = librosa.beat.beat_track(y=y, sr=sr, units='time')
+                    beat_times = [float(b) for b in bf if b < min(aclip.duration, 12)]
+                    print(f"librosa found {len(beat_times)} beats tempo {tempo}")
                 except Exception as e:
-                    print(f"beat detect failed {e}, fallback 140bpm")
-                    # fallback 140 bpm
-                    bpm = 140
-                    beat_interval = 60.0/bpm
-                    beat_times = [i*beat_interval for i in range(int(min(aclip.duration,15)/beat_interval))]
+                    print(f"librosa failed {e}, using 142 bpm fallback")
+                    beat_times = []
 
-                # Clean beat list - make cuts
+                # Fallback if librosa not found or few beats
+                if len(beat_times) < 8:
+                    bpm = 142 # phonk typical
+                    interval = 60.0 / bpm # 0.422
+                    dur = min(aclip.duration, 12)
+                    beat_times = [i*interval for i in range(int(dur/interval))]
+
                 song_dur = min(aclip.duration, 12, beat_times[-1] if beat_times else 12)
                 beat_times = [b for b in beat_times if b < song_dur]
                 if len(beat_times) < 2:
                     beat_times = [0, song_dur]
 
                 clips = []
-                # Video source duration for random cool moments
                 src_dur = vclip.duration
 
                 for i in range(len(beat_times)-1):
                     b_start = beat_times[i]
                     b_end = beat_times[i+1]
                     cut_len = b_end - b_start
-                    # Don't allow too long - cap 0.8 sec for phonk style
                     if cut_len > 0.8:
                         cut_len = 0.6
                         b_end = b_start + cut_len
+                    if cut_len < 0.15:
+                        cut_len = 0.2
 
-                    # --- COOL MOMENT FINDER ---
-                    # Pick random section, but avoid slow parts - bias to middle
-                    # This simulates "sharp moments"
                     max_start = max(0, src_dur - cut_len - 0.05)
-                    # 70% chance from middle 50% of video (usually action is there)
                     if random.random() < 0.7 and src_dur > 2:
                         mid_start = src_dur * 0.25
                         mid_end = src_dur * 0.75 - cut_len
@@ -94,16 +91,12 @@ async def do_edit(update_msg, context):
 
                     seg = vclip.subclip(src_start, src_start + cut_len)
 
-                    # --- BEAT EFFECT ---
-                    # Every beat gets an effect - synced to music
-                    if i % 8 == 0: # Drop
+                    if i % 8 == 0:
                         seg = seg.resize(1.4).crop(x_center=seg.w/2, y_center=seg.h/2, width=vclip.w, height=vclip.h)
-                        seg = seg.fx(vfx.speedx, 0.7) # slow + zoom = impact
+                        seg = seg.fx(vfx.speedx, 0.7)
                     elif i % 2 == 0:
-                        # Fast velocity on beat
                         seg = seg.fx(vfx.speedx, random.uniform(1.8, 2.6))
                     else:
-                        # Reverse / mirror phonk signature
                         if random.random() < 0.5:
                             seg = seg.fx(vfx.time_mirror)
                         seg = seg.fx(vfx.speedx, random.uniform(1.3, 2.0))
@@ -112,13 +105,10 @@ async def do_edit(update_msg, context):
                         seg = seg.fx(vfx.mirror_x)
 
                     clips.append(seg)
-
-                    # Flash on strong beats
                     if i % 4 == 0:
                         clips.append(ColorClip(size=vclip.size, color=(255,255,255), duration=0.03))
 
                 final = concatenate_videoclips(clips, method="compose")
-                # Use audio up to song_dur
                 final_audio = aclip.subclip(0, song_dur)
                 final = final.set_audio(final_audio)
 
@@ -128,7 +118,7 @@ async def do_edit(update_msg, context):
 
             await asyncio.to_thread(process)
             await status.edit_text("📤 Step 3/3: Uploading...")
-            await update_msg.reply_video(video=open(out,'rb'), caption="🔥 V10 BEAT SYNC - cuts on every beat")
+            await update_msg.reply_video(video=open(out,'rb'), caption="🔥 V10.1 BEAT SYNC - every beat cut")
             await status.delete()
 
     except Exception as e:
