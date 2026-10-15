@@ -1,13 +1,19 @@
 import os, tempfile, asyncio, traceback
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+
+# PATCH for old moviepy + new Pillow
+import PIL.Image
+if not hasattr(PIL.Image, 'ANTIALIAS'):
+    PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
+
 BOT_TOKEN=os.getenv("BOT_TOKEN")
 def menu(has_both=False):
     if has_both: return InlineKeyboardMarkup([[InlineKeyboardButton("🔥 EDIT TO MY BEAT NOW", callback_data="edit")]])
     return InlineKeyboardMarkup([[InlineKeyboardButton("How it works", callback_data="help")]])
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("🔥 V8.3 FINAL FIX\n1. Video as FILE\n2. MP3 as FILE\n3. /edit", reply_markup=menu())
+    await update.message.reply_text("🔥 V8.4 ANTIALIAS FIXED\n1. Video as FILE\n2. MP3 as FILE\n3. /edit", reply_markup=menu())
 async def on_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["video"]=(update.message.video or update.message.document).file_id
     has_both="video" in context.user_data and "audio" in context.user_data
@@ -30,21 +36,18 @@ async def do_edit(update_msg, context):
             await status.edit_text("🥁 Step 2/3: Cutting... 1-2 min")
             def process():
                 vclip=VideoFileClip(v_in)
-                if vclip.w>720: vclip=vclip.resize(width=720)
                 aclip=AudioFileClip(a_in)
                 dur=min(vclip.duration, aclip.duration, 12)
                 vclip=vclip.subclip(0,dur); aclip=aclip.subclip(0,dur)
                 beat=60.0/140.0; clips=[]; t=0; idx=0
                 while t<dur:
                     nxt=min(t+beat*2, dur)
-                    seg=vclip.subclip(t,nxt)
-                    seg=seg.fx(vfx.speedx, 1.8 if idx%2==0 else 0.7)
+                    seg=vclip.subclip(t,nxt).fx(vfx.speedx, 1.8 if idx%2==0 else 0.7)
                     clips.append(seg)
                     if idx%3==0:
                         clips.append(ColorClip(size=vclip.size, color=(255,255,255), duration=0.05))
                     t=nxt; idx+=1
-                final=concatenate_videoclips(clips)
-                final=final.set_audio(aclip)
+                final=concatenate_videoclips(clips).set_audio(aclip)
                 final.write_videofile(out, codec="libx264", audio_codec="aac", preset="ultrafast", threads=1, logger=None, ffmpeg_params=["-pix_fmt","yuv420p","-profile:v","baseline","-level","3.0","-movflags","+faststart","-vf","scale=trunc(iw/2)*2:trunc(ih/2)*2"])
                 vclip.close(); aclip.close(); final.close()
             await asyncio.to_thread(process)
