@@ -8,27 +8,24 @@ BOT_TOKEN=os.getenv("BOT_TOKEN")
 MAX_DURATION = 20
 
 def menu(has_both=False):
-    if has_both: return InlineKeyboardMarkup([[InlineKeyboardButton("🔥 Create Edit - NO BLACK", callback_data="edit")]])
+    if has_both: return InlineKeyboardMarkup([[InlineKeyboardButton("🔥 Create Edit - V20 NO BLACK", callback_data="edit")]])
     return InlineKeyboardMarkup([[InlineKeyboardButton("How it works", callback_data="help")]])
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("👋 Wizzyfx V18 - NO BLACK FIX\n\n1️⃣ Video as FILE\n2️⃣ Audio as FILE\n3️⃣ Tap Create", reply_markup=menu())
+    await update.message.reply_text("👋 Wizzyfx V20 - GUARANTEED NO BLACK\n\n1️⃣ Video as FILE\n2️⃣ Audio as FILE", reply_markup=menu())
 
 async def on_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["video"]=(update.message.video or update.message.document).file_id
-    has_audio="audio" in context.user_data
-    await update.message.reply_text("✅ Got both! Ready - NO BLACK" if has_audio else "✅ Video received.\n👉 Now send audio as FILE", reply_markup=menu(has_audio))
-
+    await update.message.reply_text("✅ Got both! Ready" if "audio" in context.user_data else "✅ Video received.\n👉 Now send audio as FILE", reply_markup=menu("audio" in context.user_data))
 async def on_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["audio"]=(update.message.audio or update.message.voice or update.message.document).file_id
-    has_video="video" in context.user_data
-    await update.message.reply_text("✅ Got both! Ready - NO BLACK" if has_video else "✅ Audio received.\n👉 Now send video as FILE", reply_markup=menu(has_video))
+    await update.message.reply_text("✅ Got both! Ready" if "video" in context.user_data else "✅ Audio received.\n👉 Now send video as FILE", reply_markup=menu("video" in context.user_data))
 
 async def do_edit(update_msg, context):
     if "video" not in context.user_data or "audio" not in context.user_data:
         await update_msg.reply_text("Send both first."); return
-    status=await update_msg.reply_text("⏳ V18 Creating - NO BLACK guaranteed 20 sec...")
+    status=await update_msg.reply_text("⏳ V20 Creating - NO BLACK guarantee...")
     try:
         from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips, TextClip, CompositeVideoClip
         import moviepy.video.fx.all as vfx
@@ -41,34 +38,44 @@ async def do_edit(update_msg, context):
                 song_dur=min(aclip.duration, MAX_DURATION)
                 W,H=vclip.size
                 src_dur=vclip.duration
-                # NO BLACK LOGIC: keep cutting until EXACT song_dur
-                clips=[]; total=0.0
-                while total < song_dur - 0.01:
-                    remaining=song_dur-total
-                    cut_len=min(random.uniform(0.3,0.5), remaining)
-                    max_start=max(0, src_dur-cut_len-0.01)
-                    s=random.uniform(0, max_start) if max_start>0 else 0
-                    e=s+cut_len
-                    seg=vclip.subclip(s, e)
-                    # KAM punch
-                    if random.random()<0.5:
-                        seg=seg.resize(1.3).crop(x_center=W/2+random.randint(-20,20), y_center=H/2, width=W, height=H).fx(vfx.speedx, 1.8)
+                def rand_seg(dur):
+                    max_s=max(0, src_dur-dur-0.01)
+                    s=random.uniform(0, max_s) if max_s>0 else 0
+                    return vclip.subclip(s, s+dur)
+                
+                # BUILD until MORE than song_dur
+                clips=[]; total=0
+                attempts=0
+                while total < song_dur + 1: # build 1 sec extra to be safe
+                    cut=random.uniform(0.28,0.45)
+                    seg=rand_seg(cut)
+                    if random.random()<0.6:
+                        seg=seg.resize(1.35).crop(x_center=W/2+random.randint(-20,20), y_center=H/2, width=W, height=H).fx(vfx.speedx, random.uniform(1.5,2.2))
                     clips.append(seg)
-                    total+=cut_len
-                # This concatenate WILL be exactly song_dur, no black
-                final_main=concatenate_videoclips(clips, method="compose").set_duration(song_dur)
-                # tiny Wizzyfx only - no KAM_CUTS
+                    total+=cut
+                    attempts+=1
+                    if attempts>150: break
+                
+                # Concatenate and FORCE cut to exactly song_dur - NO BLACK
+                base=concatenate_videoclips(clips, method="compose")
+                # If base is shorter (rare), loop it
+                if base.duration < song_dur:
+                    base=base.loop(duration=song_dur)
+                final_main=base.subclip(0, song_dur) # cut to exact - no black
+                
+                # Tiny Wizzyfx
                 try:
                     wm=TextClip("Wizzyfx", fontsize=int(H*0.032), color='white', font='DejaVu-Sans').set_duration(song_dur).set_position((0.02,0.92), relative=True).set_opacity(0.5)
                     final=CompositeVideoClip([final_main, wm], size=(W,H)).set_audio(aclip.subclip(0,song_dur)).set_duration(song_dur)
                 except:
                     final=final_main.set_audio(aclip.subclip(0,song_dur)).set_duration(song_dur)
+                
                 final.write_videofile(out, codec="libx264", audio_codec="aac", preset="ultrafast", threads=2, logger=None,
                                       ffmpeg_params=["-pix_fmt","yuv420p","-movflags","+faststart","-vf","scale=trunc(iw/2)*2:trunc(ih/2)*2"])
-                vclip.close(); aclip.close(); final.close()
+                vclip.close(); aclip.close(); final.close(); base.close()
             await asyncio.to_thread(process)
             await status.edit_text("📤 Uploading - no black...")
-            await update_msg.reply_video(video=open(out,'rb'), caption="✅ V18 NO BLACK - Wizzyfx")
+            await update_msg.reply_video(video=open(out,'rb'), caption="✅ V20 - No black 100% - Wizzyfx")
             await status.delete()
     except Exception as e:
         await update_msg.reply_text(f"Error: {e}\n{traceback.format_exc()[-1500:]}")
