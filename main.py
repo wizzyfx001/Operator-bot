@@ -9,15 +9,15 @@ MAX_DURATION=20
 
 def menu(v=0,a=False):
     kb=[]
-    if v>0 and a: kb.append([InlineKeyboardButton(f"🔥 SMART Edit V24 ({v} vids)", callback_data="edit")])
+    if v>0 and a: kb.append([InlineKeyboardButton(f"🔥 SMART Edit V24.1 ({v} vids)", callback_data="edit")])
     kb.append([InlineKeyboardButton(f"Videos: {v} | Audio: {'Yes' if a else 'No'}", callback_data="status")])
     kb.append([InlineKeyboardButton("🗑 Clear", callback_data="clear")])
     return InlineKeyboardMarkup(kb)
 
 async def start(update, context):
-    context.user_data["videos"]=[];
+    context.user_data["videos"]=[]; context.user_data["search_results"]=[]
     if "audio" in context.user_data: del context.user_data["audio"]
-    await update.message.reply_text("👋 V24 SoundCloud - No YouTube Block\n\n1. Send videos as FILE\n2. /search eloy or send mp3 as FILE", reply_markup=menu())
+    await update.message.reply_text("👋 V24.1 SoundCloud FIXED\n\n1. Send videos as FILE\n2. /search eloy or send mp3 as FILE", reply_markup=menu())
 
 async def on_video(update, context):
     if "videos" not in context.user_data: context.user_data["videos"]=[]
@@ -40,15 +40,21 @@ async def search_cmd(update, context):
         ydl_opts={'quiet':True,'skip_download':True,'extract_flat':True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             result=ydl.extract_info(f"scsearch5:{query}", download=False)
-        if not result['entries']: await status.edit_text("No results, try other keyword"); return
-        buttons=[[InlineKeyboardButton(f"🎵 {e['title'][:45]}", callback_data=f"sc_{e['url']}")] for e in result['entries'][:5]]
-        await status.edit_text("SoundCloud results (no block):", reply_markup=InlineKeyboardMarkup(buttons))
+        if not result or 'entries' not in result or not result['entries']:
+            await status.edit_text("No results, try other word"); return
+        entries=list(result['entries'])[:5]
+        context.user_data["search_results"]=entries # save
+        buttons=[]
+        for i,e in enumerate(entries):
+            title=e.get('title','Unknown')[:45]
+            buttons.append([InlineKeyboardButton(f"🎵 {title}", callback_data=f"sc_{i}")])
+        await status.edit_text("SoundCloud results (click to download):", reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e: await status.edit_text(f"Search error: {e}")
 
 async def do_edit(update_msg, context):
     if not context.user_data.get("videos") or "audio" not in context.user_data:
         await update_msg.reply_text("Send video + audio first"); return
-    status=await update_msg.reply_text(f"⏳ V24 SMART processing {len(context.user_data['videos'])} vids...")
+    status=await update_msg.reply_text(f"⏳ V24.1 SMART processing...")
     try:
         from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips, TextClip, CompositeVideoClip
         import moviepy.video.fx.all as vfx
@@ -72,7 +78,6 @@ async def do_edit(update_msg, context):
                                 move=np.mean(cv2.absdiff(g1,g2)); cool.append((vc,t,move))
                             except: continue
                     cool.sort(key=lambda x: x[2], reverse=True)
-                    # no repeat filter
                     filt=[]; used=[]
                     for vc,t,s in cool:
                         if all(abs(t-u)>0.9 for u in used): filt.append((vc,t,s)); used.append(t)
@@ -103,7 +108,7 @@ async def do_edit(update_msg, context):
                 for vc in vclips: vc.close(); aclip.close(); final.close(); merged.close()
             await asyncio.to_thread(process)
             await status.edit_text("📤 Uploading...")
-            await update_msg.reply_video(video=open(out,'rb'), caption="✅ V24 SoundCloud - No black, No repeat, Portrait fixed")
+            await update_msg.reply_video(video=open(out,'rb'), caption="✅ V24.1 - Fixed, no black, no repeat")
             await status.delete()
     except Exception as e: await update_msg.reply_text(f"Error: {e}\n{traceback.format_exc()[-800:]}")
 
@@ -112,12 +117,16 @@ async def on_btn(update, context):
     d=q.data
     if d=="edit": await do_edit(q.message, context)
     elif d=="clear":
-        context.user_data["videos"]=[];
+        context.user_data["videos"]=[]; context.user_data["search_results"]=[]
         if "audio" in context.user_data: del context.user_data["audio"]
         await q.message.edit_text("🗑 Cleared", reply_markup=menu(0,False))
     elif d.startswith("sc_"):
-        url=d[3:]; status=await q.message.reply_text("⬇️ Downloading from SoundCloud...")
         try:
+            idx=int(d.split("_")[1])
+            entries=context.user_data.get("search_results",[])
+            if idx>=len(entries): await q.message.reply_text("Search again, session expired"); return
+            url=entries[idx]['url']
+            status=await q.message.reply_text(f"⬇️ Downloading: {entries[idx].get('title','')[:30]}...")
             import yt_dlp
             with tempfile.TemporaryDirectory() as tmp:
                 ydl_opts={'format':'bestaudio/best','outtmpl':os.path.join(tmp,'audio.%(ext)s'),'postprocessors':[{'key':'FFmpegExtractAudio','preferredcodec':'mp3'}],'quiet':True}
@@ -125,10 +134,10 @@ async def on_btn(update, context):
                 for f in os.listdir(tmp):
                     if f.endswith(".mp3"):
                         p=os.path.join(tmp,f)
-                        await q.message.reply_audio(audio=open(p,'rb'), caption="✅ Downloaded from SoundCloud! Now SEND THIS FILE BACK AS FILE to set as audio")
+                        await q.message.reply_audio(audio=open(p,'rb'), caption="✅ Downloaded! SEND THIS FILE BACK AS FILE to set as audio")
                         await status.delete(); return
-                await status.edit_text("No mp3 found")
-        except Exception as e: await status.edit_text(f"Download fail: {e}")
+                await status.edit_text("No mp3 found, try another")
+        except Exception as e: await q.message.reply_text(f"Download fail: {e}")
 
 def main():
     app=ApplicationBuilder().token(BOT_TOKEN).build()
