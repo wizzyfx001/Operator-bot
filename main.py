@@ -98,7 +98,24 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else: # caption style
                 final = clip
 
-            final.write_videofile(out_path, codec="libx264", audio_codec="aac", preset="ultrafast", threads=1, logger=None)
+            final.write_videofile(
+    out_path, 
+    codec="libx264", 
+    audio_codec="aac", 
+    preset="ultrafast", 
+    threads=1, 
+    logger=None,
+    ffmpeg_params=[
+        "-pix_fmt", "yuv420p",
+        "-profile:v", "baseline",
+        "-level", "3.0",
+        "-movflags", "+faststart",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-b:v", "2000k",
+        "-maxrate", "2000k",
+        "-bufsize", "4000k"
+    ]
+            )
             clip.close()
             final.close()
 
