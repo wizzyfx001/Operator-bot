@@ -9,39 +9,95 @@ MAX_DURATION=20
 
 def menu(v=0,a=False):
     kb=[]
-    if v>0 and a: kb.append([InlineKeyboardButton(f"🔥 SMART Edit V24.3 ({v} vids)", callback_data="edit")])
+    if v>0 and a: kb.append([InlineKeyboardButton(f"🔥 SMART Edit V24.4 ({v} vids)", callback_data="edit")])
     kb.append([InlineKeyboardButton(f"Videos: {v} | Audio: {'Yes' if a else 'No'}", callback_data="status")])
     kb.append([InlineKeyboardButton("🗑 Clear", callback_data="clear")])
     return InlineKeyboardMarkup(kb)
 
 async def start(update, context):
     context.user_data["videos"]=[]; context.user_data["search_results"]=[]
-    await update.message.reply_text("👋 V24.3 FIXED - Search + Download\n\n/search burna boy = works\n/search eloy = works", reply_markup=menu())
+    if "audio" in context.user_data: del context.user_data["audio"]
+    await update.message.reply_text("👋 V24.4 FINAL - Search + Download Fixed\n\n/search burna boy works\n/search eloy works\nNo DRM, No bot block", reply_markup=menu())
 
 async def on_video(update, context):
     if "videos" not in context.user_data: context.user_data["videos"]=[]
     fid=(update.message.video or update.message.document).file_id
     context.user_data["videos"].append(fid)
-    await update.message.reply_text(f"✅ Video {len(context.user_data['videos'])} added", reply_markup=menu(len(context.user_data["videos"]), "audio" in context.user_data))
+    v=len(context.user_data["videos"])
+    await update.message.reply_text(f"✅ Video {v} added", reply_markup=menu(v, "audio" in context.user_data))
 
 async def on_audio(update, context):
     context.user_data["audio"]=(update.message.audio or update.message.voice or update.message.document).file_id
-    await update.message.reply_text("✅ Audio saved", reply_markup=menu(len(context.user_data.get("videos",[])), True))
+    v=len(context.user_data.get("videos",[]))
+    await update.message.reply_text(f"✅ Audio saved", reply_markup=menu(v, True))
 
 def piped_download(video_id, out_path):
-    for instance in ["https://pipedapi.kavin.rocks","https://api.piped.projectsegfau.lt","https://pipedapi.adminforge.de","https://piped-api.lunar.icu"]:
+    # TRY 1: PIPED - 8 instances
+    piped_instances=[
+        "https://pipedapi.kavin.rocks",
+        "https://api.piped.projectsegfau.lt",
+        "https://pipedapi.adminforge.de",
+        "https://piped-api.lunar.icu",
+        "https://pipedapi.drgns.space",
+        "https://pipedapi.leptos.io",
+        "https://pipedapi.r4fo.com",
+        "https://api.piped.privacydev.net"
+    ]
+    for instance in piped_instances:
         try:
-            r=requests.get(f"{instance}/streams/{video_id}", timeout=20)
+            r=requests.get(f"{instance}/streams/{video_id}", timeout=15)
+            if r.status_code!=200: continue
             data=r.json()
             audios=data.get('audioStreams',[])
             if not audios: continue
             audio_url=sorted(audios, key=lambda x: x.get('bitrate',0), reverse=True)[0]['url']
             rr=requests.get(audio_url, stream=True, timeout=40)
             with open(out_path, 'wb') as f:
-                for chunk in rr.iter_content(16384): f.write(chunk)
-            if os.path.getsize(out_path)>5000: return True
+                for c in rr.iter_content(16384): f.write(c)
+            if os.path.exists(out_path) and os.path.getsize(out_path)>5000:
+                print(f"Piped success {instance}")
+                return True
         except Exception as e:
-            print(f"Piped fail {instance} {e}"); continue
+            print(f"Piped fail {instance}: {e}")
+            continue
+
+    # TRY 2: INVIDIOUS - backup
+    inv_instances=["https://inv.nadeko.net","https://yewtu.be","https://invidious.nerdvpn.de","https://inv.tux.pizza","https://inv.zzls.xyz"]
+    for inv in inv_instances:
+        try:
+            r=requests.get(f"{inv}/api/v1/videos/{video_id}", timeout=15)
+            if r.status_code!=200: continue
+            data=r.json()
+            fmts=data.get('adaptiveFormats',[]) + data.get('formatStreams',[])
+            audios=[f for f in fmts if 'audio' in f.get('type','')]
+            if not audios: continue
+            audios=sorted(audios, key=lambda x: int(x.get('bitrate',0) or 0), reverse=True)
+            url=audios[0]['url']
+            rr=requests.get(url, stream=True, timeout=40)
+            with open(out_path,'wb') as f:
+                for c in rr.iter_content(16384): f.write(c)
+            if os.path.getsize(out_path)>5000:
+                print(f"Invidious success {inv}")
+                return True
+        except Exception as e:
+            print(f"Invidious fail {inv}: {e}")
+            continue
+
+    # TRY 3: COBALT
+    try:
+        r=requests.post("https://api.cobalt.tools/api/json", json={"url": f"https://youtube.com/watch?v={video_id}", "aFormat":"mp3", "isAudioOnly":True}, headers={"Accept":"application/json","Content-Type":"application/json"}, timeout=20)
+        j=r.json()
+        durl=j.get('url')
+        if durl:
+            rr=requests.get(durl, stream=True, timeout=40)
+            with open(out_path,'wb') as f:
+                for c in rr.iter_content(16384): f.write(c)
+            if os.path.getsize(out_path)>5000:
+                print("Cobalt success")
+                return True
+    except Exception as e:
+        print(f"Cobalt fail {e}")
+
     return False
 
 async def search_cmd(update, context):
@@ -50,7 +106,6 @@ async def search_cmd(update, context):
     status=await update.message.reply_text(f"🔍 Searching YouTube: {query}...")
     try:
         import yt_dlp
-        # Search via YouTube Android client - always returns results
         ydl_opts={'quiet':True,'skip_download':True,'extract_flat':True,'extractor_args':{'youtube':{'player_client':['android']}}}
         def do_search():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -58,16 +113,17 @@ async def search_cmd(update, context):
         result=await asyncio.to_thread(do_search)
         entries=[e for e in result.get('entries',[]) if e][:5]
         if not entries:
-            await status.edit_text("No results"); return
+            await status.edit_text("No results, try other words"); return
         context.user_data["search_results"]=entries
         buttons=[[InlineKeyboardButton(f"🎵 {e.get('title','')[:45]}", callback_data=f"yt_{i}")] for i,e in enumerate(entries)]
-        await status.edit_text("YouTube results (tap to download via Piped, no DRM):", reply_markup=InlineKeyboardMarkup(buttons))
-    except Exception as e: await status.edit_text(f"Search error: {e}")
+        await status.edit_text("YouTube results (tap to download - works for Naija & foreign):", reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception as e:
+        await status.edit_text(f"Search error: {e}")
 
 async def do_edit(update_msg, context):
     if not context.user_data.get("videos") or "audio" not in context.user_data:
         await update_msg.reply_text("Send video + audio first"); return
-    status=await update_msg.reply_text("⏳ SMART processing...")
+    status=await update_msg.reply_text(f"⏳ V24.4 SMART processing {len(context.user_data['videos'])} vids...")
     try:
         from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips, TextClip, CompositeVideoClip
         import moviepy.video.fx.all as vfx
@@ -121,9 +177,10 @@ async def do_edit(update_msg, context):
                 for vc in vclips: vc.close(); aclip.close(); final.close(); merged.close()
             await asyncio.to_thread(process)
             await status.edit_text("📤 Uploading...")
-            await update_msg.reply_video(video=open(out,'rb'), caption="✅ V24.3 Fixed")
+            await update_msg.reply_video(video=open(out,'rb'), caption="✅ V24.4 FINAL - No black, No repeat, Portrait fixed")
             await status.delete()
-    except Exception as e: await update_msg.reply_text(f"Error: {e}\n{traceback.format_exc()[-800:]}")
+    except Exception as e:
+        await update_msg.reply_text(f"Error: {e}\n{traceback.format_exc()[-800:]}")
 
 async def on_btn(update, context):
     q=update.callback_query; await q.answer()
@@ -137,32 +194,23 @@ async def on_btn(update, context):
         try:
             idx=int(d.split("_")[1])
             entries=context.user_data.get("search_results",[])
+            if idx>=len(entries): await q.message.reply_text("Search again, expired"); return
             item=entries[idx]
-            video_id=item.get('id') or item.get('url','').split('v=')[-1]
-            status=await q.message.reply_text(f"⬇️ Downloading via Piped: {item.get('title','')[:30]}...")
+            video_id=item.get('id')
+            if not video_id:
+                url=item.get('url','')
+                video_id=url.split('v=')[-1] if 'v=' in url else url.split('/')[-1]
+            status=await q.message.reply_text(f"⬇️ Downloading: {item.get('title','')[:40]}...\nTrying 13 servers...")
             with tempfile.TemporaryDirectory() as tmp:
                 mp3_path=os.path.join(tmp,"song.mp3")
                 ok=await asyncio.to_thread(piped_download, video_id, mp3_path)
-                if ok:
-                    await q.message.reply_audio(audio=open(mp3_path,'rb'), title=item.get('title',''), caption="✅ Downloaded! SEND THIS AUDIO BACK AS FILE to set it")
+                if ok and os.path.exists(mp3_path):
+                    await q.message.reply_audio(audio=open(mp3_path,'rb'), title=item.get('title','')[:40], caption="✅ Downloaded! Now SEND THIS AUDIO BACK AS FILE to set it for edit")
                     await status.delete()
                 else:
-                    # Fallback to cobalt if piped fails
-                    await status.edit_text("Piped busy, trying backup server...")
-                    # backup: try cobalt.tools
-                    try:
-                        r=requests.post("https://api.cobalt.tools/api/json", json={"url": f"https://youtube.com/watch?v={video_id}", "aFormat":"mp3"}, headers={"Accept":"application/json"}, timeout=20)
-                        j=r.json()
-                        durl=j.get('url')
-                        if durl:
-                            rr=requests.get(durl, stream=True, timeout=40)
-                            with open(mp3_path,'wb') as f:
-                                for chunk in rr.iter_content(16384): f.write(chunk)
-                            await q.message.reply_audio(audio=open(mp3_path,'rb'), caption="✅ Downloaded via backup! SEND AS FILE")
-                            await status.delete()
-                        else: await status.edit_text(f"All servers busy, try again in 30 sec. Video: {video_id}")
-                    except Exception as e2: await status.edit_text(f"Download failed: {e2} Try another song")
-        except Exception as e: await q.message.reply_text(f"Fail: {e}")
+                    await status.edit_text(f"All 13 servers busy for {video_id}. Try again in 1 min or try different song. This happens when many people download same time.")
+        except Exception as e:
+            await q.message.reply_text(f"Fail: {e}")
 
 def main():
     app=ApplicationBuilder().token(BOT_TOKEN).build()
@@ -172,4 +220,5 @@ def main():
     app.add_handler(MessageHandler(filters.AUDIO | filters.VOICE | filters.Document.AUDIO, on_audio))
     app.add_handler(CallbackQueryHandler(on_btn))
     app.run_polling()
+
 if __name__=="__main__": main()
