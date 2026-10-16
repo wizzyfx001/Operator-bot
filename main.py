@@ -1,6 +1,6 @@
-import os, tempfile, asyncio, traceback, random, numpy as np, requests, re
+import os, tempfile, asyncio, traceback, random, numpy as np, re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 import PIL.Image
 if not hasattr(PIL.Image, 'ANTIALIAS'): PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
 
@@ -9,7 +9,7 @@ MAX_DURATION=20
 
 def menu(v=0,a=False):
     kb=[]
-    if v>0 and a: kb.append([InlineKeyboardButton(f"🔥 SMART Edit V24.6 ({v} vids)", callback_data="edit")])
+    if v>0 and a: kb.append([InlineKeyboardButton(f"🔥 BEAT SYNC Edit V24.7 ({v} vids)", callback_data="edit")])
     kb.append([InlineKeyboardButton(f"Videos: {v} | Audio: {'Yes' if a else 'No'}", callback_data="status")])
     kb.append([InlineKeyboardButton("🗑 Clear", callback_data="clear")])
     return InlineKeyboardMarkup(kb)
@@ -17,7 +17,7 @@ def menu(v=0,a=False):
 async def start(update, context):
     context.user_data["videos"]=[]; context.user_data["search_results"]=[]
     if "audio" in context.user_data: del context.user_data["audio"]
-    await update.message.reply_text("👋 V24.6 - NO COOKIES NEEDED\nJust send YouTube link OR /search burna boy\nIt will auto-set audio", reply_markup=menu())
+    await update.message.reply_text("👋 V24.7 - BEAT SYNC\nCuts now ON BEAT, not random\nSend YouTube link OR /search + videos", reply_markup=menu())
 
 async def on_video(update, context):
     if "videos" not in context.user_data: context.user_data["videos"]=[]
@@ -31,56 +31,27 @@ async def on_audio(update, context):
     v=len(context.user_data.get("videos",[]))
     await update.message.reply_text(f"✅ Audio saved", reply_markup=menu(v, True))
 
-async def download_youtube_direct(video_id, status_msg=None):
+async def download_youtube_direct(video_id):
     import yt_dlp
     with tempfile.TemporaryDirectory() as tmp:
         out_template=os.path.join(tmp, "audio.%(ext)s")
-        final_mp3=os.path.join(tmp, "final.mp3")
-
-        # THIS IS THE FIX - No cookies needed, uses TV clients bypass
         ydl_opts={
             'format':'bestaudio/best',
             'outtmpl':out_template,
             'postprocessors':[{'key':'FFmpegExtractAudio','preferredcodec':'mp3','preferredquality':'192'}],
             'quiet':True,
             'no_warnings':True,
-            'extractor_args':{
-                'youtube':{
-                    'player_client':['android','android_music','android_mediaconnect','ios','web'],
-                    'player_skip':['webpage','configs']
-                }
-            },
-            'js_runtimes':{'node':{}},
-            'nocheckcertificate':True,
+            'extractor_args':{'youtube':{'player_client':['android','android_music','android_mediaconnect','ios','web'], 'player_skip':['webpage','configs']}},
         }
-
         def do_dl():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-            # find mp3
-            for f in os.listdir(tmp):
-                if f.startswith("audio.") and (f.endswith(".mp3") or f.endswith(".m4a") or f.endswith(".webm")):
-                    src=os.path.join(tmp,f)
-                    if not src.endswith(".mp3"):
-                        # convert already done by postprocessor
-                        pass
-                    # find actual mp3
-            # postprocessor creates audio.mp3
             mp3=os.path.join(tmp,"audio.mp3")
-            if os.path.exists(mp3):
-                return mp3
-            # check any mp3
-            for f in os.listdir(tmp):
-                if f.endswith(".mp3"):
-                    return os.path.join(tmp,f)
-            return None
-
+            return mp3 if os.path.exists(mp3) else None
         mp3_path=await asyncio.to_thread(do_dl)
         if mp3_path and os.path.exists(mp3_path):
-            # copy to persistent temp for telegram upload
             persistent=os.path.join(tempfile.gettempdir(), f"yt_{video_id}.mp3")
-            import shutil
-            shutil.copy(mp3_path, persistent)
+            import shutil; shutil.copy(mp3_path, persistent)
             return persistent
         return None
 
@@ -89,24 +60,22 @@ async def on_youtube_link(update, context):
     m=re.search(r'(?:v=|youtu\.be/|shorts/)([A-Za-z0-9_-]{6,})', url)
     if not m: return
     video_id=m.group(1)
-    status=await update.message.reply_text(f"⬇️ Downloading on Railway (NO COOKIES NEEDED): {video_id}...\nUsing TV bypass...")
+    status=await update.message.reply_text(f"⬇️ Downloading: {video_id}...")
     try:
-        mp3_path=await download_youtube_direct(video_id, status)
-        if mp3_path and os.path.exists(mp3_path):
-            sent=await update.message.reply_audio(audio=open(mp3_path,'rb'), caption="✅ Downloaded direct! Audio auto-set")
+        mp3_path=await download_youtube_direct(video_id)
+        if mp3_path:
+            sent=await update.message.reply_audio(audio=open(mp3_path,'rb'), caption="✅ Auto-set as audio!")
             context.user_data["audio"]=sent.audio.file_id
             v=len(context.user_data.get("videos",[]))
-            await status.edit_text(f"✅ Audio set! Now send videos + click SMART Edit", reply_markup=menu(v, True))
+            await status.edit_text(f"✅ Audio set!", reply_markup=menu(v, True))
             try: os.remove(mp3_path)
             except: pass
-        else:
-            await status.edit_text("❌ Still blocked. Try /search and different song, or send Spotify link instead.")
-    except Exception as e:
-        await status.edit_text(f"Error: {str(e)[:400]}")
+        else: await status.edit_text("Failed, try another")
+    except Exception as e: await status.edit_text(f"Error: {e}")
 
 async def search_cmd(update, context):
     query=" ".join(context.args)
-    if not query: return await update.message.reply_text("Use: /search burna boy OR send YouTube link")
+    if not query: return await update.message.reply_text("Use: /search burna boy")
     status=await update.message.reply_text(f"🔍 Searching: {query}...")
     try:
         import yt_dlp
@@ -119,13 +88,14 @@ async def search_cmd(update, context):
         if not entries: await status.edit_text("No results"); return
         context.user_data["search_results"]=entries
         buttons=[[InlineKeyboardButton(f"🎵 {e.get('title','')[:45]}", callback_data=f"yt_{i}")] for i,e in enumerate(entries)]
-        await status.edit_text("Tap to download (V24.6 direct, no Kiwi, no cookies):", reply_markup=InlineKeyboardMarkup(buttons))
+        await status.edit_text("Tap to download:", reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e: await status.edit_text(f"Search error: {e}")
 
+# THIS IS THE FIX FOR YOUR COMPLAINT - BEAT SYNC
 async def do_edit(update_msg, context):
     if not context.user_data.get("videos") or "audio" not in context.user_data:
-        await update_msg.reply_text("Send video + audio first. For audio, just send YouTube link!"); return
-    status=await update_msg.reply_text(f"⏳ V24.6 SMART processing...")
+        await update_msg.reply_text("Send video + audio first!"); return
+    status=await update_msg.reply_text(f"⏳ V24.7 - Analyzing BEAT of song...")
     try:
         from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips, TextClip, CompositeVideoClip
         import moviepy.video.fx.all as vfx
@@ -135,53 +105,93 @@ async def do_edit(update_msg, context):
                 p=os.path.join(tmp,f"v{i}.mp4"); f=await context.bot.get_file(fid); await f.download_to_drive(p); vfiles.append(p)
             a_in=os.path.join(tmp,"a.mp3"); out=os.path.join(tmp,"out.mp4")
             af=await context.bot.get_file(context.user_data["audio"]); await af.download_to_drive(a_in)
+
             def process():
-                vclips=[VideoFileClip(p) for p in vfiles]; aclip=AudioFileClip(a_in); song_dur=min(aclip.duration, MAX_DURATION)
-                W,H=vclips[0].size; cool=[]
+                vclips=[VideoFileClip(p) for p in vfiles]
+                aclip=AudioFileClip(a_in)
+                song_dur=min(aclip.duration, MAX_DURATION)
+                W,H=vclips[0].size
+
+                # --- BEAT DETECTION (THIS FIXES YOUR ISSUE) ---
+                import librosa
+                try:
+                    y, sr = librosa.load(a_in, duration=song_dur+1)
+                    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+                    beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+                    # Filter beats within song duration
+                    beat_times = [t for t in beat_times if t < song_dur-0.2]
+                    if len(beat_times) < 5: # fallback if beat detection fails
+                        beat_times = list(np.arange(0.3, song_dur, 0.5))
+                except Exception as e:
+                    print(f"Beat detection failed {e}, using 0.5s")
+                    beat_times = list(np.arange(0.3, song_dur, 0.5))
+
+                # Create cool moments
+                cool=[]
                 try:
                     import cv2
                     for vc in vclips:
-                        for t in np.arange(0.3, max(0.4, vc.duration-0.7), 0.45):
+                        for t in np.arange(0.3, vc.duration-0.8, 0.4):
                             try:
-                                f1=vc.get_frame(t); f2=vc.get_frame(t+0.45)
-                                if np.mean(f1)<10 or np.mean(f2)<10: continue
-                                g1=cv2.cvtColor(f1, cv2.COLOR_RGB2GRAY); g2=cv2.cvtColor(f2, cv2.COLOR_RGB2GRAY)
-                                move=np.mean(cv2.absdiff(g1,g2)); cool.append((vc,t,move))
+                                f1=vc.get_frame(t);
+                                if np.mean(f1)<8: continue
+                                g1=cv2.cvtColor(f1, cv2.COLOR_RGB2GRAY)
+                                # motion score
+                                f2=vc.get_frame(t+0.3)
+                                g2=cv2.cvtColor(f2, cv2.COLOR_RGB2GRAY)
+                                move=np.mean(cv2.absdiff(g1,g2))
+                                cool.append((vc,t,move))
                             except: continue
                     cool.sort(key=lambda x: x[2], reverse=True)
-                    filt=[]; used=[]
-                    for vc,t,s in cool:
-                        if all(abs(t-u)>0.9 for u in used): filt.append((vc,t,s)); used.append(t)
-                    cool=filt[:20]
                 except:
                     for vc in vclips:
-                        for i in range(8): cool.append((vc, i*0.8, 0))
-                clips=[]; total=0; idx=0
-                while total<song_dur and idx<len(cool):
-                    vc,t,_=cool[idx]; idx+=1
-                    if t+0.4>vc.duration: continue
-                    seg=vc.subclip(t, t+0.38).resize((W,H))
-                    zoom=1.35
-                    if idx<=4:
-                        seg_z=seg.resize(zoom).crop(x_center=W/2+random.randint(-10,10), y_center=H/2, width=W, height=H).fx(vfx.speedx, 2.0)
-                        clips.append(seg_z); clips.append(seg_z.fx(vfx.time_mirror)); total+=0.76
-                    else:
-                        seg_z=seg.resize(zoom).crop(x_center=W/2, y_center=H/2, width=W, height=H).fx(vfx.speedx, random.uniform(1.7,2.1))
-                        clips.append(seg_z); total+=0.38
+                        for i in range(15): cool.append((vc, i*0.5, 0))
+
+                # --- BUILD CLIPS ON BEAT ---
+                clips=[]
+                last_cool_idx=0
+                for i in range(len(beat_times)-1):
+                    beat_start=beat_times[i]
+                    beat_end=beat_times[i+1]
+                    beat_dur=beat_end-beat_start
+                    if beat_dur>1.2: beat_dur=0.5
+                    if beat_dur<0.18: beat_dur=0.18
+
+                    # Pick best clip
+                    if last_cool_idx>=len(cool): last_cool_idx=0
+                    vc,t,_=cool[last_cool_idx]; last_cool_idx+=1
+                    if t+beat_dur>vc.duration: t=max(0, vc.duration-beat_dur-0.1)
+
+                    seg=vc.subclip(t, t+beat_dur).resize((W,H))
+
+                    # BEAT EFFECTS: On every 2nd beat, add zoom punch
+                    if i%2==0:
+                        seg=seg.resize(1.25).crop(x_center=W/2+random.randint(-15,15), y_center=H/2, width=W, height=H)
+                    if i%4==0: # Every 4th beat = heavy 808, speed up
+                        seg=seg.fx(vfx.speedx, 1.6)
+                    if i%8==0: # Mirror for funk style
+                        seg=seg.fx(vfx.mirror_x)
+
+                    clips.append(seg)
+
                 merged=concatenate_videoclips(clips, method="compose")
-                if merged.duration<song_dur: merged=merged.loop(duration=song_dur+0.2)
-                final_main=merged.subclip(0, song_dur).crop(y1=int(H*0.08), y2=H, x1=0, x2=W).resize((W,H))
+                if merged.duration<song_dur: merged=merged.loop(duration=song_dur+0.1)
+                final_main=merged.subclip(0, song_dur).crop(y1=int(H*0.07), y2=H, x1=0, x2=W).resize((W,H))
+
                 try:
                     wm=TextClip("Wizzyfx", fontsize=int(H*0.03), color='white', font='DejaVu-Sans').set_duration(song_dur).set_position((0.02,0.92), relative=True).set_opacity(0.5)
                     final=CompositeVideoClip([final_main, wm], size=(W,H)).set_audio(aclip.subclip(0,song_dur)).set_duration(song_dur)
                 except: final=final_main.set_audio(aclip.subclip(0,song_dur)).set_duration(song_dur)
+
                 final.write_videofile(out, codec="libx264", audio_codec="aac", preset="ultrafast", threads=2, logger=None, ffmpeg_params=["-pix_fmt","yuv420p","-movflags","+faststart"])
-                for vc in vclips: vc.close(); aclip.close(); final.close(); merged.close()
+                for vc in vclips: vc.close()
+                aclip.close(); final.close(); merged.close()
+
             await asyncio.to_thread(process)
-            await status.edit_text("📤 Uploading...")
-            await update_msg.reply_video(video=open(out,'rb'), caption="✅ V24.6")
+            await status.edit_text("📤 Uploading beat-synced edit...")
+            await update_msg.reply_video(video=open(out,'rb'), caption="✅ V24.7 BEAT SYNC - cuts on beat now!")
             await status.delete()
-    except Exception as e: await update_msg.reply_text(f"Error: {e}\n{traceback.format_exc()[-800:]}")
+    except Exception as e: await update_msg.reply_text(f"Error: {e}\n{traceback.format_exc()[-1000:]}")
 
 async def on_btn(update, context):
     q=update.callback_query; await q.answer()
@@ -197,17 +207,16 @@ async def on_btn(update, context):
             entries=context.user_data.get("search_results",[])
             item=entries[idx]
             video_id=item.get('id') or item.get('url','').split('v=')[-1]
-            status=await q.message.reply_text(f"⬇️ Direct download (bypass): {item.get('title','')[:40]}...")
-            mp3_path=await download_youtube_direct(video_id, status)
+            status=await q.message.reply_text(f"⬇️ Downloading: {item.get('title','')[:40]}...")
+            mp3_path=await download_youtube_direct(video_id)
             if mp3_path and os.path.exists(mp3_path):
-                sent=await q.message.reply_audio(audio=open(mp3_path,'rb'), title=item.get('title','')[:40], caption="✅ Auto-set as audio!")
+                sent=await q.message.reply_audio(audio=open(mp3_path,'rb'), title=item.get('title','')[:40], caption="✅ Auto-set!")
                 context.user_data["audio"]=sent.audio.file_id
                 v=len(context.user_data.get("videos",[]))
-                await status.edit_text(f"✅ Audio set! Now send videos", reply_markup=menu(v, True))
+                await status.edit_text(f"✅ Audio set!", reply_markup=menu(v, True))
                 try: os.remove(mp3_path)
                 except: pass
-            else:
-                await status.edit_text(f"Failed for {video_id}, try another song")
+            else: await status.edit_text(f"Failed")
         except Exception as e: await q.message.reply_text(f"Fail: {e}")
 
 def main():
